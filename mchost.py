@@ -33,14 +33,61 @@ if True:  # IMPORTS:
 
 
 class MCServer:
-    def __init__(self, serverPath, popenCommand):
-        self.startServer(serverPath,popenCommand)
-    
-    def startServer(self,serverPath,popenCommand):
-        if platform in ["win32", "win64"]:
-            self.ServerPopen = Popen(popenCommand, cwd=serverPath, stdin=PIPE,
-                                     stdout=PIPE, stderr=PIPE,close_fds=True)
-        elif platform == "linux":
-            self.ServerPopen = Popen(["/bin/bash", "-c", popenCommand], cwd=serverPath,
-                             stdin=PIPE, stdout=PIPE, stderr=PIPE, close_fds=True)
+    __platform = platform
 
+    def __init__(self, serverPath, popenCommand, autoRestarts=True):
+
+        self.loaded = False
+        self.running = True
+        self.outputQueue = []
+        self.autoRestarts = autoRestarts
+        self.__runServerThread = Thread(
+            target=self.__runServer, args=(serverPath, popenCommand))
+        self.__runServerThread.start()
+        time.sleep(0.5)
+        self.__outputManagerThread = Thread(
+            target=self.__outputManager, args=())
+        self.__outputManagerThread.start()
+
+    def __runServer(self, serverPath, popenCommand):
+        if self.__platform in ["win32", "win64"]:
+            self.serverPopen = Popen(popenCommand, cwd=serverPath, stdin=PIPE,
+                                     stdout=PIPE, stderr=PIPE, close_fds=True)
+        elif self.__platform == "linux":
+            self.serverPopen = Popen(["/bin/bash", "-c", popenCommand], cwd=serverPath,
+                                     stdin=PIPE, stdout=PIPE, stderr=PIPE, close_fds=True)
+
+    def getNextOutput(self):
+        if len(self.outputQueue) > 0:
+            returnVal = self.outputQueue[0]
+            self.outputQueue.remove(returnVal)
+            return returnVal
+        return None
+
+    def __outputManager(self):
+        while self.running:
+            time.sleep(0.01)
+            for i in self.serverPopen.stdout:
+                self.outputQueue.append(self.__convertLine(i))
+
+    def __convertLineLinux(self, line):
+        linestr = str(line)
+        return linestr[2:len(linestr)-3]
+
+    def __convertLineWindows(self, line):
+        return str(line.rstrip())[2:len(line)]
+    
+    if __platform in ["win32", "win64"]:
+            __convertLine = __convertLineWindows
+    else:
+        __convertLine = __convertLineLinux
+
+
+theServer = MCServer(serverPath="Server",
+                     popenCommand="java -XX:ParallelGCThreads=2 -Xms1G -Xmx4G -Dfml.readTimeout=60 -jar fabric-server-launch.jar nogui", autoRestarts=False)
+
+while theServer.running:
+    out = theServer.getNextOutput()
+    if out != None:
+        print(out)
+    time.sleep(0.01)
